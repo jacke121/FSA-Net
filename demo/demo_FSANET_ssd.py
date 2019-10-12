@@ -1,15 +1,16 @@
 import os
+import time
+
 import cv2
 import sys
 sys.path.append('..')
 import numpy as np
 from math import cos, sin
-# from moviepy.editor import *
+
 from lib.FSANET_model import *
 import numpy as np
 from keras.layers import Average
-# from moviepy.editor import *
-# from mtcnn.mtcnn import MTCNN
+
 
 def draw_axis(img, yaw, pitch, roll, tdx=None, tdy=None, size = 50):
     print(yaw,roll,pitch)
@@ -44,7 +45,7 @@ def draw_axis(img, yaw, pitch, roll, tdx=None, tdy=None, size = 50):
 
     return img
     
-def draw_results_ssd(detected,input_img,faces,ad,img_size,img_w,img_h,model,time_detection,time_network,time_plot):
+def draw_results_ssd(detected,input_img,faces,ad,img_size,img_w,img_h,model):
     
     # loop over the detections
     if detected.shape[2]>0:
@@ -73,44 +74,28 @@ def draw_results_ssd(detected,input_img,faces,ad,img_size,img_w,img_h,model,time
                 yw1 = max(int(y1 - ad * h), 0)
                 xw2 = min(int(x2 + ad * w), img_w - 1)
                 yw2 = min(int(y2 + ad * h), img_h - 1)
-                
+
+                cv2.rectangle(input_img, (xw1,yw1), (xw2,yw2), (0, 0, 255), 2)
+                start=time.time()
                 faces[i,:,:,:] = cv2.resize(input_img[yw1:yw2 + 1, xw1:xw2 + 1, :], (img_size, img_size))
                 faces[i,:,:,:] = cv2.normalize(faces[i,:,:,:], None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)        
                 
                 face = np.expand_dims(faces[i,:,:,:], axis=0)
                 p_result = model.predict(face)
-                
+                print('fangxiang',time.time()-start)
                 face = face.squeeze()
                 img = draw_axis(input_img[yw1:yw2 + 1, xw1:xw2 + 1, :], p_result[0][0], p_result[0][1], p_result[0][2])
                 
                 input_img[yw1:yw2 + 1, xw1:xw2 + 1, :] = img
-                
-    cv2.imshow("result", input_img)
     
-    return input_img #,time_network,time_plot
+    return input_img
 
 def main():
-    try:
-        os.mkdir('./img')
-    except OSError:
-        pass
+    os.makedirs('./img',exist_ok=True)
 
-    # face_cascade = cv2.CascadeClassifier('lbpcascade_frontalface_improved.xml')
-    # detector = MTCNN()
-
-    # load model and weights
     img_size = 64
-    stage_num = [3,3,3]
-    lambda_local = 1
-    lambda_d = 1
     img_idx = 0
-    detected = '' #make this not local variable
-    time_detection = 0
-    time_network = 0
-    time_plot = 0
-    skip_frame = 1 # every 5 frame do 1 detection and network forward propagation
     ad = 0.6
-
     #Parameters
     num_capsule = 3
     dim_capsule = 16
@@ -131,17 +116,16 @@ def main():
 
     model3 = FSA_net_noS_Capsule(image_size, num_classes, stage_num, lambda_d, S_set)()
     
-    print('Loading models ...')
-
     weight_file1 = '../pre-trained/300W_LP_models/fsanet_capsule_3_16_2_21_5/fsanet_capsule_3_16_2_21_5.h5'
     model1.load_weights(weight_file1)
     print('Finished loading model 1.')
     
     weight_file2 = '../pre-trained/300W_LP_models/fsanet_var_capsule_3_16_2_21_5/fsanet_var_capsule_3_16_2_21_5.h5'
+    weight_file3 = '../pre-trained/300W_LP_models/fsanet_noS_capsule_3_16_2_192_5/fsanet_noS_capsule_3_16_2_192_5.h5'
     model2.load_weights(weight_file2)
     print('Finished loading model 2.')
 
-    weight_file3 = '../pre-trained/300W_LP_models/fsanet_noS_capsule_3_16_2_192_5/fsanet_noS_capsule_3_16_2_192_5.h5'
+
     model3.load_weights(weight_file3)
     print('Finished loading model 3.')
 
@@ -151,8 +135,6 @@ def main():
     x3 = model3(inputs) #w/o
     avg_model = Average()([x1,x2,x3])
     model = Model(inputs=inputs, outputs=avg_model)
-    
-
 
     # load our serialized face detector from disk
     print("[INFO] loading face detector...")
@@ -163,13 +145,8 @@ def main():
 
     # capture video
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1024*1)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 768*1)
-    
-
-
-    print('Start detecting pose ...')
-    detected_pre = np.empty((1,1,1))
+    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1024*1)
+    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 768*1)
 
     while True:
         # get video frame
@@ -178,38 +155,17 @@ def main():
         img_idx = img_idx + 1
         img_h, img_w, _ = np.shape(input_img)
 
-        
-        if img_idx==1 or img_idx%skip_frame == 0:
-            time_detection = 0
-            time_network = 0
-            time_plot = 0
-            
-            # detect faces using LBP detector
-            gray_img = cv2.cvtColor(input_img,cv2.COLOR_BGR2GRAY)
-            # detected = face_cascade.detectMultiScale(gray_img, 1.1)
-            # detected = detector.detect_faces(input_img)
-            # pass the blob through the network and obtain the detections and
-            # predictions
-            blob = cv2.dnn.blobFromImage(cv2.resize(input_img, (300, 300)), 1.0,
-                (300, 300), (104.0, 177.0, 123.0))
-            net.setInput(blob)
-            detected = net.forward()
+        blob = cv2.dnn.blobFromImage(cv2.resize(input_img, (300, 300)), 1.0,
+            (300, 300), (104.0, 177.0, 123.0))
+        net.setInput(blob)
+        detected = net.forward()
 
-            if detected_pre.shape[2] > 0 and detected.shape[2] == 0:
-                detected = detected_pre
+        faces = np.empty((detected.shape[2], img_size, img_size, 3))
 
-            faces = np.empty((detected.shape[2], img_size, img_size, 3))
+        input_img = draw_results_ssd(detected,input_img,faces,ad,img_size,img_w,img_h,model)
+            # cv2.imwrite('img/'+str(img_idx)+'.png',input_img)
 
-            input_img = draw_results_ssd(detected,input_img,faces,ad,img_size,img_w,img_h,model,time_detection,time_network,time_plot)
-            cv2.imwrite('img/'+str(img_idx)+'.png',input_img)
-            
-        else:
-            input_img = draw_results_ssd(detected,input_img,faces,ad,img_size,img_w,img_h,model,time_detection,time_network,time_plot)
-
-
-        if detected.shape[2] > detected_pre.shape[2] or img_idx%(skip_frame*3) == 0:
-            detected_pre = detected
-
+        cv2.imshow("result", input_img)
         key = cv2.waitKey(1)
         
 if __name__ == '__main__':

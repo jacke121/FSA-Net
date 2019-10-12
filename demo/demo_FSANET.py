@@ -4,11 +4,8 @@ import os
 import cv2
 import sys
 sys.path.append('..')
-import numpy as np
 from math import cos, sin
-# from moviepy.editor import *
 from lib.FSANET_model import *
-# from moviepy.editor import *
 from keras import backend as K
 from keras.layers import Average
 
@@ -45,21 +42,16 @@ def draw_axis(img, yaw, pitch, roll, tdx=None, tdy=None, size = 80):
 
     return img
     
-def draw_results(detected,input_img,faces,ad,img_size,img_w,img_h,model,time_detection,time_network,time_plot):
+def draw_results(detected,input_img,faces,ad,img_size,img_w,img_h,model):
     
     if len(detected) > 0:
         for i, (x,y,w,h) in enumerate(detected):
             #x1, y1, x2, y2, w, h = d.left(), d.top(), d.right() + 1, d.bottom() + 1, d.width(), d.height()
-            
-            x1 = x
-            y1 = y
-            x2 = x+w
-            y2 = y+h
 
-            xw1 = max(int(x1 - ad * w), 0)
-            yw1 = max(int(y1 - ad * h), 0)
-            xw2 = min(int(x2 + ad * w), img_w - 1)
-            yw2 = min(int(y2 + ad * h), img_h - 1)
+            xw1 = max(int(x - ad * w), 0)
+            yw1 = max(int(y - ad * h), 0)
+            xw2 = min(int(x+w + ad * w), img_w - 1)
+            yw2 = min(int(y+h + ad * h), img_h - 1)
             
             faces[i,:,:,:] = cv2.resize(input_img[yw1:yw2 + 1, xw1:xw2 + 1, :], (img_size, img_size))
             faces[i,:,:,:] = cv2.normalize(faces[i,:,:,:], None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)        
@@ -67,34 +59,24 @@ def draw_results(detected,input_img,faces,ad,img_size,img_w,img_h,model,time_det
             face = np.expand_dims(faces[i,:,:,:], axis=0)
             p_result = model.predict(face)
             
-            face = face.squeeze()
+            # face = face.squeeze()
             img = draw_axis(input_img[yw1:yw2 + 1, xw1:xw2 + 1, :], p_result[0][0], p_result[0][1], p_result[0][2])
             
             input_img[yw1:yw2 + 1, xw1:xw2 + 1, :] = img
-            
-    cv2.imshow("result", input_img)
     
-    return input_img #,time_network,time_plot
+    return input_img
 
 def main():
-    try:
-        os.mkdir('./img')
-    except OSError:
-        pass
-    
+
+    os.makedirs('./img',exist_ok=True)
+
     K.set_learning_phase(0) # make sure its testing mode
     face_cascade = cv2.CascadeClassifier('lbpcascade_frontalface_improved.xml')
     
     # load model and weights
     img_size = 64
-    stage_num = [3,3,3]
-    lambda_local = 1
-    lambda_d = 1
     img_idx = 0
     detected = '' #make this not local variable
-    time_detection = 0
-    time_network = 0
-    time_plot = 0
     skip_frame = 5 # every 5 frame do 1 detection and network forward propagation
     ad = 0.6
 
@@ -117,9 +99,6 @@ def main():
     S_set = [num_capsule, dim_capsule, routings, num_primcaps, m_dim]
 
     model3 = FSA_net_noS_Capsule(image_size, num_classes, stage_num, lambda_d, S_set)()
-    
-    print('Loading models ...')
-
     weight_file1 = '../pre-trained/300W_LP_models/fsanet_capsule_3_16_2_21_5/fsanet_capsule_3_16_2_21_5.h5'
     model1.load_weights(weight_file1)
     print('Finished loading model 1.')
@@ -155,10 +134,7 @@ def main():
         img_h, img_w, _ = np.shape(input_img)
         
         if img_idx==1 or img_idx%skip_frame == 0:
-            time_detection = 0
-            time_network = 0
-            time_plot = 0
-            
+
             # detect faces using LBP detector
             gray_img = cv2.cvtColor(input_img,cv2.COLOR_BGR2GRAY)
             detected = face_cascade.detectMultiScale(gray_img, 1.1)
@@ -168,16 +144,16 @@ def main():
 
             faces = np.empty((len(detected), img_size, img_size, 3))
 
-            input_img = draw_results(detected,input_img,faces,ad,img_size,img_w,img_h,model,time_detection,time_network,time_plot)
-            cv2.imwrite('img/'+str(img_idx)+'.png',input_img)
+            input_img = draw_results(detected,input_img,faces,ad,img_size,img_w,img_h,model)
+            # cv2.imwrite('img/'+str(img_idx)+'.png',input_img)
             
         else:
-            input_img = draw_results(detected,input_img,faces,ad,img_size,img_w,img_h,model,time_detection,time_network,time_plot)
+            input_img = draw_results(detected,input_img,faces,ad,img_size,img_w,img_h,model)
 
 
         if len(detected) > len(detected_pre) or img_idx%(skip_frame*3) == 0:
             detected_pre = detected
-
+        cv2.imshow("result",input_img)
         key = cv2.waitKey(1)
         
 if __name__ == '__main__':
